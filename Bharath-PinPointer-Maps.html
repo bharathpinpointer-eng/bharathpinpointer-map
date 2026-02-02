@@ -1,0 +1,230 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>BharathPinPointer - Final Engine</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <style>
+        :root { --primary: #1a73e8; --success: #28a745; --dark: #333; }
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; background: #f8f9fa; overflow: hidden; }
+        #map { height: 100vh; width: 100vw; z-index: 1; }
+
+        /* Top Bar */
+        .top-search-bar {
+            position: absolute; top: 15px; left: 10px; right: 10px; z-index: 1001;
+            background: white; padding: 10px; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; gap: 8px;
+        }
+        .top-search-bar input { flex: 1; border: 1px solid #ddd; padding: 10px; border-radius: 8px; outline: none; font-size: 14px; }
+        
+        /* Side Controls */
+        .side-controls {
+            position: absolute; bottom: 200px; right: 15px;
+            display: flex; flex-direction: column; gap: 12px; z-index: 1000;
+        }
+        .m-btn {
+            width: 55px; height: 55px; background: white; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2); font-size: 22px; cursor: pointer; border: none;
+        }
+        .zoom-btn { 
+            height: 45px; width: 45px; border-radius: 8px; background: white; 
+            font-weight: bold; font-size: 20px; display: flex; 
+            align-items: center; justify-content: center; cursor: pointer; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid #ddd;
+        }
+        
+        /* Control Colors */
+        .blue-target-btn { background: var(--primary); color: white; }
+        .nav-btn { background: var(--success); color: white; }
+        .export-btn { background: #555; color: white; }
+        .theme-btn { background: #333; color: gold; }
+
+        /* Bottom Status Panel */
+        .bottom-panel {
+            position: absolute; bottom: 0; width: 100%; background: white;
+            padding: 10px 0px 25px 0px; border-radius: 24px 24px 0 0; z-index: 1001;
+            box-shadow: 0 -4px 15px rgba(0,0,0,0.1); text-align: center;
+        }
+        .coord-box { display: flex; justify-content: space-evenly; margin-bottom: 12px; font-weight: bold; font-size: 13px; color: #444; }
+        .action-btn {
+            width: 90%; padding: 15px; border-radius: 12px; font-weight: bold; border: none;
+            font-size: 16px; cursor: not-allowed; opacity: 0.4; background: #ccc; color: white;
+            transition: 0.3s ease;
+        }
+        .btn-enabled { background: var(--primary); cursor: pointer; opacity: 1; box-shadow: 0 4px 12px rgba(26,115,232,0.3); }
+    </style>
+</head>
+<body>
+
+    <div class="top-search-bar">
+        <input type="text" id="digiPin" placeholder="Enter DigiPIN to Unlock..." oninput="checkUnlock()">
+        <div style="padding:10px; color:#666;"><i class="fas fa-database"></i></div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="side-controls">
+        <div style="display:flex; flex-direction:column; gap:5px; margin-bottom:10px;">
+            <div class="zoom-btn" onclick="map.zoomIn()">+</div>
+            <div class="zoom-btn" onclick="map.zoomOut()">−</div>
+        </div>
+
+        <div class="m-btn theme-btn" id="themeBtn" onclick="toggleTheme()" title="Switch Day/Night">
+            <i class="fas fa-moon"></i>
+        </div>
+
+        <div class="m-btn export-btn" onclick="exportData()" title="Export Records">
+            <i class="fas fa-file-download"></i>
+        </div>
+
+        <div class="m-btn nav-btn" id="navBtn" onclick="startNavigation()" style="display:none;">
+            <i class="fas fa-directions"></i>
+        </div>
+
+        <div class="m-btn blue-target-btn" id="blueBtn" onclick="triggerBlueButton()">
+            <i class="fas fa-crosshairs"></i>
+        </div>
+    </div>
+
+    <div class="bottom-panel">
+        <div style="font-size:11px; color:#888; margin-bottom:5px;">Data is automatically backed up locally.</div>
+        <div class="coord-box">
+            <div>Lat: <span id="lat">0.000000</span></div>
+            <div>Long: <span id="lng">0.000000</span></div>
+        </div>
+        <button id="copyBtn" class="action-btn" onclick="copyCoordsAndSave()" disabled>Copy & Backup Location</button>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Map Layers
+        var lightTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' });
+        var darkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '© CartoDB' });
+
+        var map = L.map('map', { zoomControl: false, doubleClickZoom: false }).setView([20.5937, 78.9629], 5);
+        lightTiles.addTo(map);
+
+        var isNight = false;
+        var mainPin, isUnlocked = false, pinPlaced = false;
+
+        // ✅ Theme Toggle
+        function toggleTheme() {
+            isNight = !isNight;
+            const btn = document.getElementById('themeBtn');
+            if (isNight) {
+                map.removeLayer(lightTiles);
+                darkTiles.addTo(map);
+                btn.innerHTML = '<i class="fas fa-sun"></i>';
+                btn.style.color = "orange";
+            } else {
+                map.removeLayer(darkTiles);
+                lightTiles.addTo(map);
+                btn.innerHTML = '<i class="fas fa-moon"></i>';
+                btn.style.color = "gold";
+            }
+        }
+
+        function checkUnlock() {
+            var pinVal = document.getElementById('digiPin').value.trim();
+            if(pinVal.length >= 4) { isUnlocked = true; } 
+            else { isUnlocked = false; pinPlaced = false; resetMap(); }
+            updateCopyButton();
+        }
+
+        function triggerBlueButton() {
+            if(!isUnlocked) { alert("🔒 Enter DigiPIN first!"); return; }
+            map.locate({setView: true, maxZoom: 18, enableHighAccuracy: true});
+        }
+
+        map.on('locationfound', function(e) { placeSinglePin(e.latlng); });
+
+        function placeSinglePin(latlng) {
+            var dPin = document.getElementById('digiPin').value.trim();
+            if (mainPin) map.removeLayer(mainPin);
+            
+            mainPin = L.marker(latlng).addTo(map).bindPopup(
+                "<b>📍 DigiPIN:</b> " + dPin +
+                "<br><b>Lat:</b> " + latlng.lat.toFixed(6) +
+                "<br><b>Lng:</b> " + latlng.lng.toFixed(6)
+            ).openPopup();
+
+            document.getElementById('lat').innerText = latlng.lat.toFixed(6);
+            document.getElementById('lng').innerText = latlng.lng.toFixed(6);
+            
+            pinPlaced = true;
+            document.getElementById('navBtn').style.display = 'flex';
+            updateCopyButton();
+        }
+
+        function updateCopyButton() {
+            var btn = document.getElementById('copyBtn');
+            if (isUnlocked && pinPlaced) { btn.classList.add('btn-enabled'); btn.disabled = false; } 
+            else { btn.classList.remove('btn-enabled'); btn.disabled = true; }
+        }
+
+        function resetMap() {
+            if (mainPin) map.removeLayer(mainPin);
+            document.getElementById('lat').innerText = "0.000000";
+            document.getElementById('lng').innerText = "0.000000";
+            document.getElementById('navBtn').style.display = 'none';
+        }
+
+        // Navigation
+        function startNavigation() {
+            var lat = document.getElementById('lat').innerText;
+            var lng = document.getElementById('lng').innerText;
+            if(lat !== "0.000000") {
+                window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
+            }
+        }
+
+        // Copy & Local Backup Logic
+        function copyCoordsAndSave() {
+            if (!isUnlocked || !pinPlaced) return;
+
+            var lat = document.getElementById('lat').innerText;
+            var lng = document.getElementById('lng').innerText;
+            var dPin = document.getElementById('digiPin').value.trim();
+
+            var record = {
+                digipin: dPin,
+                latitude: lat,
+                longitude: lng,
+                timestamp: new Date().toLocaleString()
+            };
+
+            var allData = JSON.parse(localStorage.getItem("bpp_data") || "[]");
+            allData.push(record);
+            localStorage.setItem("bpp_data", JSON.stringify(allData));
+
+            var copyText = "DigiPIN: " + dPin + "\nLatitude: " + lat + "\nLongitude: " + lng;
+            navigator.clipboard.writeText(copyText).then(() => {
+                alert("✅ Copied & Saved Locally!");
+            });
+        }
+
+        // Export JSON
+        function exportData() {
+            var data = localStorage.getItem("bpp_data");
+            if (!data || data === "[]") {
+                alert("No records found to export!");
+                return;
+            }
+            var blob = new Blob([data], { type: "application/json" });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement("a");
+            a.href = url;
+            a.download = "BPP_Backup_" + new Date().getTime() + ".json";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            alert("📂 Exported successfully!");
+        }
+    </script>
+</body>
+</html>
