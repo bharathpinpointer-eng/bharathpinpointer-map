@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>BharathPinPointer – Live Test</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"/>
+
+<style>
+:root { --primary:#1a73e8; --success:#28a745; }
+body{margin:0;font-family:'Segoe UI',Tahoma,sans-serif;background:#f8f9fa;overflow:hidden;}
+#map{height:100vh;width:100vw;}
+
+.top-search-bar{
+ position:absolute;top:15px;left:10px;right:10px;z-index:1001;
+ background:#fff;padding:10px;border-radius:12px;
+ box-shadow:0 4px 15px rgba(0,0,0,0.2);display:flex;gap:8px;
+}
+.top-search-bar input{
+ flex:1;border:1px solid #ddd;padding:10px;border-radius:8px;font-size:14px;
+}
+
+.side-controls{
+ position:absolute;bottom:200px;right:15px;z-index:1000;
+ display:flex;flex-direction:column;gap:12px;
+}
+.m-btn{
+ width:55px;height:55px;border-radius:50%;
+ display:flex;align-items:center;justify-content:center;
+ background:#fff;box-shadow:0 4px 12px rgba(0,0,0,0.2);
+ font-size:22px;cursor:pointer;border:none;
+}
+.zoom-btn{
+ width:45px;height:45px;border-radius:8px;
+ background:#fff;font-weight:bold;font-size:20px;
+ display:flex;align-items:center;justify-content:center;
+ box-shadow:0 2px 8px rgba(0,0,0,0.1);border:1px solid #ddd;
+}
+.blue-target-btn{background:var(--primary);color:#fff;}
+.nav-btn{background:var(--success);color:#fff;}
+.export-btn{background:#555;color:#fff;}
+.theme-btn{background:#333;color:gold;}
+
+.bottom-panel{
+ position:absolute;bottom:0;width:100%;background:#fff;
+ padding:10px 0 25px;border-radius:24px 24px 0 0;
+ box-shadow:0 -4px 15px rgba(0,0,0,0.1);text-align:center;z-index:1001;
+}
+.coord-box{
+ display:flex;justify-content:space-evenly;margin-bottom:6px;
+ font-weight:bold;font-size:13px;color:#444;
+}
+.extra-box{
+ font-size:11px;color:#555;margin-bottom:8px;
+}
+.action-btn{
+ width:90%;padding:15px;border-radius:12px;
+ font-weight:bold;border:none;font-size:16px;
+ cursor:not-allowed;opacity:.4;background:#ccc;color:#fff;
+}
+.btn-enabled{
+ background:var(--primary);cursor:pointer;opacity:1;
+ box-shadow:0 4px 12px rgba(26,115,232,0.3);
+}
+</style>
+</head>
+
+<body>
+
+<div class="top-search-bar">
+ <input id="digiPin" placeholder="Enter DigiPIN to Unlock..." oninput="checkUnlock()">
+ <div style="padding:10px;color:#666;"><i class="fas fa-database"></i></div>
+</div>
+
+<div id="map"></div>
+
+<div class="side-controls">
+ <div style="display:flex;flex-direction:column;gap:5px;">
+  <div class="zoom-btn" onclick="map.zoomIn()">+</div>
+  <div class="zoom-btn" onclick="map.zoomOut()">-</div>
+ </div>
+ <div class="m-btn theme-btn" onclick="toggleTheme()"><i class="fas fa-moon"></i></div>
+ <div class="m-btn export-btn" onclick="exportData()"><i class="fas fa-file-download"></i></div>
+ <div class="m-btn nav-btn" id="navBtn" onclick="startNavigation()" style="display:none;">
+  <i class="fas fa-directions"></i>
+ </div>
+ <div class="m-btn blue-target-btn" onclick="triggerBlueButton()">
+  <i class="fas fa-crosshairs"></i>
+ </div>
+</div>
+
+<div class="bottom-panel">
+ <div style="font-size:11px;color:#888;">Data is automatically backed up locally.</div>
+
+ <div class="coord-box">
+  <div>Lat: <span id="lat">0.000000</span></div>
+  <div>Lng: <span id="lng">0.000000</span></div>
+ </div>
+
+ <div class="extra-box">
+  Address: <span id="addr">-</span>
+ </div>
+
+ <button id="copyBtn" class="action-btn" onclick="copyAndSave()">Copy & Backup Location</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+
+const light = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+const dark  = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png');
+
+const map = L.map('map',{zoomControl:false}).setView([20.59,78.96],5);
+light.addTo(map);
+
+let isNight=false, mainPin=null, isUnlocked=false, pinPlaced=false;
+let centerLat=null, centerLng=null;
+let maxDistance=6;
+
+const A1={digipin:"",lat:"",lng:"",addr:""};
+
+function toggleTheme(){
+ isNight=!isNight;
+ isNight?(map.removeLayer(light),dark.addTo(map))
+         :(map.removeLayer(dark),light.addTo(map));
+}
+
+function checkUnlock(){
+ A1.digipin=document.getElementById('digiPin').value.trim();
+ isUnlocked=A1.digipin.length>=4;
+ updateCopyBtn();
+}
+
+function triggerBlueButton(){
+ if(!isUnlocked){ alert("Enter DigiPIN first"); return; }
+ map.locate({setView:true,maxZoom:18,enableHighAccuracy:true});
+}
+
+map.on('locationfound',e=>{
+ if(e.accuracy>50){
+   alert("Low GPS accuracy (>50m). Move to open area.");
+   return;
+ }
+ centerLat=e.latlng.lat;
+ centerLng=e.latlng.lng;
+ placePin(e.latlng);
+});
+
+map.on('locationerror',()=>{
+ alert("Location permission denied.");
+});
+
+function placePin(latlng){
+ if(mainPin) map.removeLayer(mainPin);
+
+ mainPin=L.marker(latlng,{draggable:true}).addTo(map);
+
+ A1.lat=latlng.lat.toFixed(6);
+ A1.lng=latlng.lng.toFixed(6);
+
+ document.getElementById('lat').innerText=A1.lat;
+ document.getElementById('lng').innerText=A1.lng;
+
+ pinPlaced=true;
+ document.getElementById('navBtn').style.display='flex';
+ updateCopyBtn();
+
+ mainPin.on("dragend",restrictDrag);
+}
+
+function getDistance(lat1,lon1,lat2,lon2){
+ const R=6371000;
+ const dLat=(lat2-lat1)*Math.PI/180;
+ const dLon=(lon2-lon1)*Math.PI/180;
+ const a=Math.sin(dLat/2)**2+
+ Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+ Math.sin(dLon/2)**2;
+ return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function restrictDrag(e){
+ const pos=e.target.getLatLng();
+ if(getDistance(centerLat,centerLng,pos.lat,pos.lng)>maxDistance){
+   mainPin.setLatLng([centerLat,centerLng]);
+   alert("Only 6 meter adjustment allowed.");
+ }
+}
+
+function copyAndSave(){
+ if(!isUnlocked||!pinPlaced) return;
+
+ const data={...A1,time:new Date().toISOString()};
+ navigator.clipboard.writeText(JSON.stringify(data));
+
+ const list=JSON.parse(localStorage.getItem("bpp_data")||"[]");
+ list.push(data);
+ localStorage.setItem("bpp_data",JSON.stringify(list));
+
+ alert("Copied & Saved");
+}
+
+function updateCopyBtn(){
+ const b=document.getElementById('copyBtn');
+ if(isUnlocked&&pinPlaced){
+  b.classList.add('btn-enabled');b.disabled=false;
+ }else{
+  b.classList.remove('btn-enabled');b.disabled=true;
+ }
+}
+
+function startNavigation(){
+ if(A1.lat)
+  window.open(`https://www.google.com/maps/dir/?api=1&destination=${A1.lat},${A1.lng}`,'_blank');
+}
+
+function exportData(){
+ const d=localStorage.getItem("bpp_data");
+ if(!d||d==="[]"){alert("No data");return;}
+ const a=document.createElement("a");
+ a.href=URL.createObjectURL(new Blob([d],{type:"application/json"}));
+ a.download="BPP_Backup.json";
+ a.click();
+}
+
+</script>
+</body>
+</html>
